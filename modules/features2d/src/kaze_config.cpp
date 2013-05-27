@@ -21,30 +21,3 @@
  */
 
 #include "kaze_config.h"
-
-//*******************************************************************************
-//*******************************************************************************
-
-/**
- * @brief Ipoint default constructor
- */
-toptions::toptions(void)
-{
-    soffset = DEFAULT_SCALE_OFFSET;
-    omax = DEFAULT_OCTAVE_MAX;
-    nsublevels = DEFAULT_NSUBLEVELS;
-    dthreshold = DEFAULT_DETECTOR_THRESHOLD;
-    dthreshold2 = DEFAULT_DETECTOR_THRESHOLD;
-    diffusivity = DEFAULT_DIFFUSIVITY_TYPE;
-    descriptor = DEFAULT_DESCRIPTOR_MODE;
-    sderivatives = DEFAULT_SIGMA_SMOOTHING_DERIVATIVES;
-    upright = DEFAULT_UPRIGHT;
-    extended = DEFAULT_EXTENDED;
-    save_scale_space = DEFAULT_SAVE_SCALE_SPACE;
-    save_keypoints = DEFAULT_SAVE_KEYPOINTS;
-    show_results = DEFAULT_SHOW_RESULTS;
-    verbosity = DEFAULT_VERBOSITY;
-}
-
-//*******************************************************************************
-//*******************************************************************************

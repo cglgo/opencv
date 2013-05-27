@@ -35,58 +35,22 @@
 /** Authors: Ievgen Khvedchenia */
 
 #include "precomp.hpp"
-#include <iterator>
 #include "KAZE.h"
+#include <iterator>
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define DEGREE_TO_RADIAN(x) ((x) * CV_PI / 180.0)
-#define RADIAN_TO_DEGREE(x) ((x) * 180.0 / CV_PI)
-
 namespace cv
 {
-
-    static inline void convertPoint(const cv::KeyPoint& kp, Ipoint& aux)
-    {
-        aux.xf = kp.pt.x;
-        aux.yf = kp.pt.y;
-        aux.x = fRound(aux.xf);
-        aux.y = fRound(aux.yf);
-
-        //cout << "SURF size: " << kpts_surf1_[i].size*.5 << endl;
-        aux.octave = kp.octave;
-
-        // Get the radius for visualization
-        aux.scale = kp.size*.5/2.5;
-        aux.angle = DEGREE_TO_RADIAN(kp.angle);
-
-        aux.descriptor_size = 64;
-    }
-
-    static inline void convertPoint(const Ipoint& src, cv::KeyPoint& kp)
-    {
-        kp.pt.x = src.xf;
-        kp.pt.y = src.yf;
-
-        kp.angle    = RADIAN_TO_DEGREE(src.angle);
-        kp.response = src.dresponse;
-
-        //kp.octave
-        kp.octave = src.octave;    
-        kp.size = src.scale;
-    }
-
-
     KAZE::KAZE()
     {
 
     }
 
-
     int KAZE::descriptorSize() const
     {
-        return 64;
+        return 64; // TODO Return 128 if descriptor type is extended
     }
 
     int KAZE::descriptorType() const
@@ -112,7 +76,7 @@ namespace cv
         cv::Mat img1_32;
         _image.getMat().convertTo(img1_32, CV_32F, 1.0/255.0,0);
 
-        toptions opt;
+        KAZEOptions opt;
         opt.img_width = img1_32.cols;
         opt.img_height = img1_32.rows;
 
@@ -120,46 +84,21 @@ namespace cv
 
         evolution.Create_Nonlinear_Scale_Space(img1_32);
 
-        std::vector<Ipoint> kazePoints;
-
         if (do_keypoints)
         {
-            evolution.Feature_Detection(kazePoints);
+            evolution.Feature_Detection(_keypoints);
 
             if (!_mask.empty())
             {
-                //KeyPointsFilter::runByPixelsMask(kazePoints, _mask);
-            }
-        }
-        else
-        {
-            kazePoints.resize(_keypoints.size());
-            for (size_t i = 0; i < kazePoints.size(); i++)
-            {
-                convertPoint(_keypoints[i], kazePoints[i]);    
-            }
-        }
-
-        evolution.Feature_Description(kazePoints);
-
-        if (do_keypoints)
-        {
-            _keypoints.resize(kazePoints.size());
-            for (size_t i = 0; i < kazePoints.size(); i++)
-            {
-                convertPoint(kazePoints[i], _keypoints[i]);
+                KeyPointsFilter::runByPixelsMask(_keypoints, _mask.getMat());
             }
         }
 
         if (do_descriptors)
         {
+            cv::KeyPointsFilter::runByImageBorder(_keypoints, cv::Size(opt.img_width, opt.img_height), 40);
             cv::Mat& descriptors = _descriptors.getMatRef();
-            descriptors.create(kazePoints.size(), descriptorSize(), descriptorType());
-
-            for (size_t i = 0; i < kazePoints.size(); i++)
-            {
-                std::copy(kazePoints[i].descriptor.begin(), kazePoints[i].descriptor.end(), (float*)descriptors.row(i).data);
-            }
+            evolution.Feature_Description(_keypoints, descriptors);
         }
     }
 
