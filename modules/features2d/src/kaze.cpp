@@ -21,6 +21,7 @@
 * @author Pablo F. Alcantarilla
 */
 
+#include "precomp.hpp"
 #include "kaze.h"
 #include "kaze_config.h"
 #include <iostream>

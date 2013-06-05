@@ -23,6 +23,7 @@
 * @author Pablo F. Alcantarilla
 */
 
+#include "precomp.hpp"
 #include "kaze_nldiffusion_functions.h"
 
 // Namespaces
