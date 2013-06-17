@@ -22,7 +22,8 @@ class KAZE
 {
 private:
     // Parameters of the Nonlinear diffusion class
-    const KAZEOptions options;
+    KAZEOptions options;
+
     float kcontrast; // The contrast parameter for the scalar nonlinear diffusion
 
 

@@ -37,14 +37,17 @@ using namespace std;
 //*******************************************************************************
 
 /**
- * @brief This funtion rounds float to nearest integer
- * @param flt Input float
- * @return dst Nearest integer
- */
+* @brief This funtion rounds float to nearest integer
+* @param flt Input float
+* @return dst Nearest integer
+*/
 static inline int fRound(float flt)
 {
-  return (int)(flt+0.5);
+    return (int)(flt+0.5);
 }
+
+static inline void Clipping_Descriptor(float *desc, int dsize, int niter, float ratio);
+static inline void Check_Descriptor_Limits(int &x, int &y, int width, int height );
 
 
 /**
@@ -432,10 +435,10 @@ void KAZE::Determinant_Hessian_Parallel(std::vector<cv::KeyPoint> &kpts)
             if( is_extremum == true )
             {
                 // Check that the point is under the image limits for the descriptor computation
-                left_x = fRound(kpts_par[i][j].pt.x-smax*kpts_par[i][j].size)-1;
-                right_x = fRound(kpts_par[i][j].pt.x+smax*kpts_par[i][j].size)+1;
-                up_y = fRound(kpts_par[i][j].pt.y-smax*kpts_par[i][j].size)-1;
-                down_y = fRound(kpts_par[i][j].pt.y+smax*kpts_par[i][j].size)+1;
+                left_x = fRound(kpts_par[i][j].pt.x-smax*kpts_par[i][j].size);
+                right_x = fRound(kpts_par[i][j].pt.x+smax*kpts_par[i][j].size);
+                up_y = fRound(kpts_par[i][j].pt.y-smax*kpts_par[i][j].size);
+                down_y = fRound(kpts_par[i][j].pt.y+smax*kpts_par[i][j].size);
 
                 if( left_x < 0 || right_x >= evolution[level].Ldet.cols ||
                     up_y < 0 || down_y >= evolution[level].Ldet.rows)
@@ -925,8 +928,12 @@ void KAZE::Get_SURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -968,6 +975,11 @@ void KAZE::Get_SURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc)
     for(int i = 0; i < dsize; i++)
     {
         desc[i] /= len;
+    }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
     }
 }
 
@@ -1024,8 +1036,12 @@ void KAZE::Get_SURF_Descriptor_64(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -1072,6 +1088,12 @@ void KAZE::Get_SURF_Descriptor_64(cv::KeyPoint &kpt, float *desc)
     {
         desc[i] /= len;
     }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
+    }
+
 }
 
 //*************************************************************************************
@@ -1147,8 +1169,12 @@ void KAZE::Get_MSURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2, options.img_width, options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -1198,6 +1224,11 @@ void KAZE::Get_MSURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc)
     for(int i = 0; i < dsize; i++)
     {
         desc[i] /= len;
+    }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
     }
 }
 
@@ -1278,8 +1309,12 @@ void KAZE::Get_MSURF_Descriptor_64(cv::KeyPoint &kpt, float *desc)
                     y1 = fRound(sample_y-.5);
                     x1 = fRound(sample_x-.5);
 
-                    y2 = fRound(sample_y+.5);
-                    x2 = fRound(sample_x+.5);
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
+                    y2 = (int)(sample_y+.5);
+                    x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -1330,6 +1365,11 @@ void KAZE::Get_MSURF_Descriptor_64(cv::KeyPoint &kpt, float *desc)
     {
         desc[i] /= len;
     }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc, dsize, CLIPPING_NORMALIZATION_NITER, CLIPPING_NORMALIZATION_RATIO);
+    }
 }
 
 //*************************************************************************************
@@ -1372,9 +1412,9 @@ void KAZE::Get_GSURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc)
         {
             dx=dy=mdx=mdy=0.0;
 
-            for(float k = i; k < i + sample_step; k+=0.5)
+            for(int k = i; k < i + sample_step; k++)
             {
-                for(float l = j; l < j + sample_step; l+=0.5)
+                for(int l = j; l < j + sample_step; l++)
                 {
                     // Get the coordinates of the sample point on the rotated axis
                     sample_y = yf + l*scale;
@@ -1383,8 +1423,12 @@ void KAZE::Get_GSURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -1461,6 +1505,12 @@ void KAZE::Get_GSURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc)
     {
         desc[i] /= len;
     }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc, dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
+    }
+
 }
 
 //*************************************************************************************
@@ -1506,9 +1556,9 @@ void KAZE::Get_GSURF_Descriptor_64(cv::KeyPoint &kpt, float *desc)
         {
             dx=dy=mdx=mdy=0.0;
 
-            for(float k = i; k < i + sample_step; k+=0.5)
+            for(int k = i; k < i + sample_step; k++)
             {
-                for(float l = j; l < j + sample_step; l+=0.5)
+                for(int l = j; l < j + sample_step; l++)
                 {
                     // Get the coordinates of the sample point on the rotated axis
                     sample_y = yf + (l*scale*co + k*scale*si);
@@ -1517,8 +1567,12 @@ void KAZE::Get_GSURF_Descriptor_64(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -1595,6 +1649,12 @@ void KAZE::Get_GSURF_Descriptor_64(cv::KeyPoint &kpt, float *desc)
     {
         desc[i] /= len;
     }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
+    }
+
 }
 
 //*************************************************************************************
@@ -1647,8 +1707,12 @@ void KAZE::Get_SURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -1713,6 +1777,11 @@ void KAZE::Get_SURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc)
     {
         desc[i] /= len;
     }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
+    }
 }
 
 //*************************************************************************************
@@ -1770,8 +1839,12 @@ void KAZE::Get_SURF_Descriptor_128(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -1839,6 +1912,11 @@ void KAZE::Get_SURF_Descriptor_128(cv::KeyPoint &kpt, float *desc)
     for(int i = 0; i < dsize; i++)
     {
         desc[i] /= len;
+    }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
     }
 }
 
@@ -1919,8 +1997,12 @@ void KAZE::Get_MSURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -1993,6 +2075,11 @@ void KAZE::Get_MSURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc)
     for(int i = 0; i < dsize; i++)
     {
         desc[i] /= len;
+    }
+
+    if(USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
     }
 }
 
@@ -2077,8 +2164,12 @@ void KAZE::Get_MSURF_Descriptor_128(cv::KeyPoint &kpt, float *desc)
                     y1 = fRound(sample_y-.5);
                     x1 = fRound(sample_x-.5);
 
-                    y2 = fRound(sample_y+.5);
-                    x2 = fRound(sample_x+.5);
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
+                    y2 = (int)(sample_y+.5);
+                    x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -2154,6 +2245,11 @@ void KAZE::Get_MSURF_Descriptor_128(cv::KeyPoint &kpt, float *desc)
         desc[i] /= len;
     }
 
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
+    }
+
 }
 
 //*************************************************************************************
@@ -2197,9 +2293,9 @@ void KAZE::Get_GSURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc)
             dxp=dxn=mdxp=mdxn=0.0;
             dyp=dyn=mdyp=mdyn=0.0;
 
-            for(float k = i; k < i + sample_step; k+=0.5)
+            for(int k = i; k < i + sample_step; k++)
             {
-                for(float l = j; l < j + sample_step; l+=0.5)
+                for(int l = j; l < j + sample_step; l++)
                 {
                     sample_y = k*scale + yf;
                     sample_x = l*scale + xf;
@@ -2207,8 +2303,12 @@ void KAZE::Get_GSURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -2306,6 +2406,11 @@ void KAZE::Get_GSURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc)
     for(int i = 0; i < dsize; i++)
     {
         desc[i] /= len;
+    }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
     }
 }
 
@@ -2355,9 +2460,9 @@ void KAZE::Get_GSURF_Descriptor_128(cv::KeyPoint &kpt, float *desc)
             dxp=dxn=mdxp=mdxn=0.0;
             dyp=dyn=mdyp=mdyn=0.0;
 
-            for(float k = i; k < i + sample_step; k+=0.5)
+            for(int k = i; k < i + sample_step; k++)
             {
-                for(float l = j; l < j + sample_step; l+=0.5)
+                for(int l = j; l < j + sample_step; l++)
                 {
                     // Get the coordinates of the sample point on the rotated axis
                     sample_y = yf + (l*scale*co + k*scale*si);
@@ -2366,8 +2471,12 @@ void KAZE::Get_GSURF_Descriptor_128(cv::KeyPoint &kpt, float *desc)
                     y1 = (int)(sample_y-.5);
                     x1 = (int)(sample_x-.5);
 
+                    Check_Descriptor_Limits(x1,y1, options.img_width, options.img_height);
+
                     y2 = (int)(sample_y+.5);
                     x2 = (int)(sample_x+.5);
+
+                    Check_Descriptor_Limits(x2,y2,options.img_width,options.img_height);
 
                     fx = sample_x-x1;
                     fy = sample_y-y1;
@@ -2465,6 +2574,11 @@ void KAZE::Get_GSURF_Descriptor_128(cv::KeyPoint &kpt, float *desc)
     for(int i = 0; i < dsize; i++)
     {
         desc[i] /= len;
+    }
+
+    if( USE_CLIPPING_NORMALIZATION == true )
+    {
+        Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
     }
 }
 
