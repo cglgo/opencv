@@ -70,38 +70,8 @@ public:
     void AOS_Columns(const cv::Mat &Ldprev, const cv::Mat &c, const float stepsize);
     void Thomas(cv::Mat a, cv::Mat b, cv::Mat Ld, cv::Mat x);
 
-    // Methods for saving the scale space set of images and detector responses
-    void Save_Nonlinear_Scale_Space(void);
-    void Save_Detector_Responses(void);
-    void Save_Flow_Responses(void);
-
     // Feature Description methods
     void Feature_Description(std::vector<cv::KeyPoint> &kpts, cv::Mat &desc);
-    void Compute_Main_Orientation_SURF(cv::KeyPoint &kpt);
-
-    // Descriptor Mode -> 0 SURF 64
-    void Get_SURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc);
-    void Get_SURF_Descriptor_64(cv::KeyPoint &kpt, float *desc);
-
-    // Descriptor Mode -> 0 SURF 128
-    void Get_SURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc);
-    void Get_SURF_Descriptor_128(cv::KeyPoint &kpt, float *desc);
-
-    // Descriptor Mode -> 1 M-SURF 64
-    void Get_MSURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc);
-    void Get_MSURF_Descriptor_64(cv::KeyPoint &kpt, float *desc);
-
-    // Descriptor Mode -> 1 M-SURF 128
-    void Get_MSURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc);
-    void Get_MSURF_Descriptor_128(cv::KeyPoint &kpt, float *desc);
-
-    // Descriptor Mode -> 2 G-SURF 64
-    void Get_GSURF_Upright_Descriptor_64(cv::KeyPoint &kpt, float *desc);
-    void Get_GSURF_Descriptor_64(cv::KeyPoint &kpt, float *desc);
-
-    // Descriptor Mode -> 2 G-SURF 128
-    void Get_GSURF_Upright_Descriptor_128(cv::KeyPoint &kpt, float *desc);
-    void Get_GSURF_Descriptor_128(cv::KeyPoint &kpt, float *desc);
 };
 
 // Inline functions
