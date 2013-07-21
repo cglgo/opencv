@@ -70,105 +70,14 @@ void Gaussian_2D_Convolution(const cv::Mat &src, cv::Mat &dst, unsigned int ksiz
 //*************************************************************************************
 
 /**
-* @brief This function computes image derivatives with symmetric differences
-* @param src Input image
-* @param dst Output image
-* @param xorder Derivative order in X-direction (horizontal)
-* @param yorder Derivative order in Y-direction (vertical)
-*/
-void Image_Derivatives_SD(const cv::Mat &src, cv::Mat &dst, unsigned int xorder, unsigned int yorder)
-{
-    unsigned int norder_x = xorder;
-    unsigned int norder_y = yorder;
-    int left = 0, right = 0, up = 0, down = 0;
-
-    // Initialize the destination image
-    dst = cv::Mat::zeros(dst.rows,dst.cols,CV_32F);
-
-    // Create an auxiliary image
-    cv::Mat aux(dst.rows,dst.cols,CV_32F);
-    src.copyTo(aux);
-
-    // Firstly compute derivatives in the x-axis (horizontal)
-    while( norder_x != 0 )
-    {
-        for( int i = 0; i < aux.rows; i++ )
-        {
-            for( int j = 0; j < aux.cols; j++ )
-            {
-                left = j-1;
-                right = j+1;
-
-                // Check the horizontal bounds
-                if( left < 0 )
-                {
-                    left = 0;
-                }
-
-                if( right >= aux.cols)
-                {
-                    right = aux.cols-1;
-                }
-
-                *(dst.ptr<float>(i)+j) = 0.5*((*(aux.ptr<float>(i)+right))-(*(aux.ptr<float>(i)+left)));
-            }
-        }
-
-        norder_x--;
-
-        if( norder_x != 0 )
-        {
-            dst.copyTo(aux);
-        }
-    }
-
-    // Compute derivatives in the y-axis (vertical)
-    while( norder_y != 0 )
-    {
-        for( int i = 0; i < aux.cols; i++ )
-        {
-            for( int j = 0; j < aux.rows; j++ )
-            {
-                up = j-1;
-                down = j+1;
-
-                // Check the vertical bounds
-                if( up < 0 )
-                {
-                    up = 0;
-                }
-
-                if( down >= aux.rows)
-                {
-                    down = aux.rows-1;
-                }
-
-                *(dst.ptr<float>(j)+i) = 0.5*((*(aux.ptr<float>(down)+i))-(*(aux.ptr<float>(up)+i)));
-            }
-        }
-
-        norder_y--;
-
-        if( norder_y != 0 )
-        {
-            dst.copyTo(aux);
-        }
-    }
-}
-
-//*************************************************************************************
-//*************************************************************************************
-
-/**
 * @brief This function computes the Perona and Malik conductivity coefficient g1
 * g1 = exp(-|dL|^2/k^2)
-* @param src Input image
-* @param dst Output image
 * @param Lx First order image derivative in X-direction (horizontal)
 * @param Ly First order image derivative in Y-direction (vertical)
+ * @param dst Output image
 * @param k Contrast factor parameter
 */
-void PM_G1(const cv::Mat &src, cv::Mat &dst, cv::Mat &Lx, cv::Mat &Ly, float k )
+void PM_G1(const cv::Mat &Lx, const cv::Mat &Ly, cv::Mat &dst, float k )
 {
     cv::exp(-(Lx.mul(Lx) + Ly.mul(Ly))/(k*k),dst);
 }
@@ -179,13 +88,12 @@ void PM_G1(const cv::Mat &src, cv::Mat &dst, cv::Mat &Lx, cv::Mat &Ly, float k )
 /**
 * @brief This function computes the Perona and Malik conductivity coefficient g2
 * g2 = 1 / (1 + dL^2 / k^2)
-* @param src Input image
-* @param dst Output image
 * @param Lx First order image derivative in X-direction (horizontal)
 * @param Ly First order image derivative in Y-direction (vertical)
+ * @param dst Output image
 * @param k Contrast factor parameter
 */
-void PM_G2(const cv::Mat &src, cv::Mat &dst, cv::Mat &Lx, cv::Mat &Ly, float k )
+void PM_G2(const cv::Mat &Lx, const cv::Mat &Ly, cv::Mat &dst, float k )
 {
     dst = 1./(1. + (Lx.mul(Lx) + Ly.mul(Ly))/(k*k));
 }
@@ -195,16 +103,15 @@ void PM_G2(const cv::Mat &src, cv::Mat &dst, cv::Mat &Lx, cv::Mat &Ly, float k )
 
 /**
 * @brief This function computes Weickert conductivity coefficient g3
-* @param src Input image
-* @param dst Output image
 * @param Lx First order image derivative in X-direction (horizontal)
 * @param Ly First order image derivative in Y-direction (vertical)
+ * @param dst Output image
 * @param k Contrast factor parameter
 * @note For more information check the following paper: J. Weickert
 * Applications of nonlinear diffusion in image processing and computer vision,
 * Proceedings of Algorithmy 2000
 */
-void Weickert_Diffusivity(const cv::Mat &src, cv::Mat &dst, cv::Mat &Lx, cv::Mat &Ly, float k )
+void Weickert_Diffusivity(const cv::Mat &Lx, const cv::Mat &Ly, cv::Mat &dst, float k )
 {
     cv::Mat modg;
     cv::pow((Lx.mul(Lx) + Ly.mul(Ly))/(k*k),4,modg);

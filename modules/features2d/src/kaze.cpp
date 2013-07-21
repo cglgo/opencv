@@ -32,16 +32,14 @@
 using namespace std;
 
 typedef std::vector<tevolution> KAZEEvolution;
-
-#define HAVE_THREADING_SUPPORT 0
-
 static inline float Get_Angle(float X, float Y);
 static inline void Check_Descriptor_Limits(int &x, int &y, int width, int height );
 static inline void Check_Descriptor_Limits(int &x, int &y, const cv::Size& sz);
-
 static inline int fRound(float flt);
-static inline void Clipping_Descriptor(float *desc, int dsize, int niter, float ratio);
-static inline void Check_Descriptor_Limits(int &x, int &y, int width, int height );
+static inline float gaussian(float x, float y, float sig);
+
+//*******************************************************************************
+//*******************************************************************************
 
 /**
 * @brief This method computes the main orientation for a given keypoint
@@ -76,7 +74,7 @@ void Compute_Main_Orientation_SURF(cv::KeyPoint &kpt, const KAZEEvolution& evolu
 
                 if( iy >= 0 && iy < imgSize.height && ix >= 0 && ix < imgSize.width )
                 {
-                    gweight = gaussian(iy-yf,ix-xf,3.5*s);
+                    gweight = gaussian(iy-yf,ix-xf,2.5*s);
                     resX[idx] = gweight*(*(evolution[level].Lx.ptr<float>(iy)+ix));
                     resY[idx] = gweight*(*(evolution[level].Ly.ptr<float>(iy)+ix));
                 }
@@ -129,9 +127,10 @@ void Compute_Main_Orientation_SURF(cv::KeyPoint &kpt, const KAZEEvolution& evolu
 }
 
 //*******************************************************************************
+//*******************************************************************************
 
 /**
-* Functional object to compute the SURF descriptors in parallel
+* @brief Functional object to compute the SURF descriptors in parallel
 */
 struct SURFInvoker : public cv::ParallelLoopBody
 {
@@ -141,18 +140,22 @@ struct SURFInvoker : public cv::ParallelLoopBody
     * Initialize the SURFInvoker.
     */
     SURFInvoker(const KAZEEvolution& _evolution, std::vector<cv::KeyPoint>& _keypoints, cv::Mat& _desc, const KAZEOptions& options)
-        : evolution(_evolution)
-        , keypoints(_keypoints)
-        , desc(_desc)
+        : evolution(&_evolution)
+        , keypoints(&_keypoints)
+        , desc(&_desc)
         , upright(options.upright)
         , extended(options.extended)
         , imgSize(options.img_width, options.img_height)
     {
         // We select the required extraction function only once during object creation. It's faster than doing to IF's for each keypoint.
         if (upright)
+        {
             computeDescriptorFn = (extended ? &SURFInvoker::Get_SURF_Upright_Descriptor_128 : &SURFInvoker::Get_SURF_Upright_Descriptor_64);
+        }
         else
+        {
             computeDescriptorFn = (extended ? &SURFInvoker::Get_SURF_Descriptor_128 : &SURFInvoker::Get_SURF_Descriptor_64);
+        }
     }
 
     /**
@@ -162,13 +165,17 @@ struct SURFInvoker : public cv::ParallelLoopBody
     {
         for (int i = r.start; i < r.end; i++)
         {
-            cv::KeyPoint& kp   = keypoints[i];
-            float * descriptor = desc.ptr<float>(i);
+            cv::KeyPoint& kp   = (*keypoints)[i];
+            float * descriptor = (*desc).ptr<float>(i);
 
             if (upright)
-                kp.angle = 0;
+            {
+                kp.angle = 0.0f;
+            }
             else
-                Compute_Main_Orientation_SURF(kp, evolution, imgSize);
+            {
+                Compute_Main_Orientation_SURF(kp, *evolution, imgSize);
+            }
 
             (this->*computeDescriptorFn)(kp, descriptor);
         }
@@ -176,14 +183,12 @@ struct SURFInvoker : public cv::ParallelLoopBody
 
 private:
 
-    const std::vector<tevolution>& evolution;
-    std::vector<cv::KeyPoint>&     keypoints;
-    cv::Mat&                       desc;
-
+    const std::vector<tevolution>* evolution;
+    std::vector<cv::KeyPoint>*     keypoints;
+    cv::Mat*                       desc;
     bool                           upright;
     bool                           extended;
     cv::Size                       imgSize;
-
     DescriptorComputeFn            computeDescriptorFn;
 
 private:
@@ -245,16 +250,16 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         // Sum the derivatives to the cumulative descriptor
@@ -293,8 +298,7 @@ private:
                 desc[dcount++] = mdyn;
 
                 // Store the current length^2 of the vector
-                len += dxp*dxp + dxn*dxn + mdxp*mdxp + mdxn*mdxn +
-                    dyp*dyp + dyn*dyn + mdyp*mdyp + mdyn*mdyn;
+                len += dxp*dxp+dxn*dxn+mdxp*mdxp+mdxn*mdxn+dyp*dyp+dyn*dyn+mdyp*mdyp+mdyn*mdyn;
             }
         }
 
@@ -304,11 +308,6 @@ private:
         for(int i = 0; i < dsize; i++)
         {
             desc[i] /= len;
-        }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
         }
     }
 
@@ -374,16 +373,16 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         // Get the x and y derivatives on the rotated axis
@@ -426,8 +425,7 @@ private:
                 desc[dcount++] = mdyn;
 
                 // Store the current length^2 of the vector
-                len += dxp*dxp + dxn*dxn + mdxp*mdxp + mdxn*mdxn +
-                    dyp*dyp + dyn*dyn + mdyp*mdyp + mdyn*mdyn;
+                len += dxp*dxp+dxn*dxn+mdxp*mdxp+mdxn*mdxn+dyp*dyp+dyn*dyn+mdyp*mdyp+mdyn*mdyn;
             }
         }
 
@@ -437,11 +435,6 @@ private:
         for(int i = 0; i < dsize; i++)
         {
             desc[i] /= len;
-        }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
         }
     }
 
@@ -500,16 +493,16 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         // Sum the derivatives to the cumulative descriptor
@@ -538,15 +531,7 @@ private:
         {
             desc[i] /= len;
         }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
-        }
     }
-
-    //*************************************************************************************
-    //*************************************************************************************
 
     /**
     * @brief This method computes the descriptor of the provided keypoint given the
@@ -608,16 +593,16 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         // Get the x and y derivatives on the rotated axis
@@ -650,34 +635,36 @@ private:
         {
             desc[i] /= len;
         }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
-        }
-
     }
 };
 
-//////////////////////////////////////////////////////////////////////////
+//*******************************************************************************
+//*******************************************************************************
 
+/**
+* @brief Functional object to compute the M-SURF descriptors in parallel
+*/
 struct MSURFInvoker : public cv::ParallelLoopBody
 {
     typedef void (MSURFInvoker::*DescriptorComputeFn)(cv::KeyPoint &kpt, float *desc) const;
 
     MSURFInvoker(const KAZEEvolution& _evolution, std::vector<cv::KeyPoint>& _keypoints, cv::Mat& _desc, const KAZEOptions& options)
-        : evolution(_evolution)
-        , keypoints(_keypoints)
-        , desc(_desc)
+        : evolution(&_evolution)
+        , keypoints(&_keypoints)
+        , desc(&_desc)
         , upright(options.upright)
         , extended(options.extended)
         , imgSize(options.img_width, options.img_height)
     {
         // We select the required extraction function only once during object creation. It's faster than doing to IF's for each keypoint.
         if (upright)
+        {
             computeDescriptorFn = extended ? &MSURFInvoker::Get_MSURF_Upright_Descriptor_128 : &MSURFInvoker::Get_MSURF_Upright_Descriptor_64;
+        }
         else
+        {
             computeDescriptorFn = extended ? &MSURFInvoker::Get_MSURF_Descriptor_128 : &MSURFInvoker::Get_MSURF_Descriptor_64;
+    }
     }
 
     /**
@@ -687,13 +674,17 @@ struct MSURFInvoker : public cv::ParallelLoopBody
     {
         for (int i = r.start; i < r.end; i++)
         {
-            cv::KeyPoint& kp   = keypoints[i];
-            float * descriptor = desc.ptr<float>(i);
+            cv::KeyPoint& kp   = (*keypoints)[i];
+            float * descriptor = (*desc).ptr<float>(i);
 
             if (upright)
-                kp.angle = 0;
+            {
+                kp.angle = 0.0f;
+            }
             else
-                Compute_Main_Orientation_SURF(kp, evolution, imgSize);
+            {
+                Compute_Main_Orientation_SURF(kp, *evolution, imgSize);
+            }
 
             (this->*computeDescriptorFn)(kp, descriptor);
         }
@@ -701,14 +692,12 @@ struct MSURFInvoker : public cv::ParallelLoopBody
 
 private:
 
-    const std::vector<tevolution>& evolution;
-    std::vector<cv::KeyPoint>&     keypoints;
-    cv::Mat&                       desc;
-
+    const KAZEEvolution*           evolution;
+    std::vector<cv::KeyPoint>*     keypoints;
+    cv::Mat*                       desc;
     bool                           upright;
     bool                           extended;
     cv::Size                       imgSize;
-
     DescriptorComputeFn            computeDescriptorFn;
 
 private:
@@ -793,16 +782,16 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         rx = gauss_s1*rx;
@@ -838,11 +827,6 @@ private:
         for(int i = 0; i < dsize; i++)
         {
             desc[i] /= len;
-        }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
         }
     }
 
@@ -930,16 +914,16 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         // Get the x and y derivatives on the rotated axis
@@ -975,11 +959,6 @@ private:
         for(int i = 0; i < dsize; i++)
         {
             desc[i] /= len;
-        }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc, dsize, CLIPPING_NORMALIZATION_NITER, CLIPPING_NORMALIZATION_RATIO);
         }
     }
 
@@ -1067,16 +1046,16 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         rx = gauss_s1*rx;
@@ -1136,15 +1115,7 @@ private:
         {
             desc[i] /= len;
         }
-
-        if(USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
-        }
     }
-
-    //*************************************************************************************
-    //*************************************************************************************
 
     /**
     * @brief This method computes the extended G-SURF descriptor of the provided keypoint
@@ -1234,16 +1205,16 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         // Get the x and y derivatives on the rotated axis
@@ -1304,33 +1275,36 @@ private:
         {
             desc[i] /= len;
         }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
-        }
-
     }
 };
 
-//////////////////////////////////////////////////////////////////////////
+//*******************************************************************************
+//*******************************************************************************
+
+/**
+* @brief Functional object to compute the G-SURF descriptors in parallel
+*/
 struct GSURFInvoker : public cv::ParallelLoopBody
 {
     typedef void (GSURFInvoker::*DescriptorComputeFn)(cv::KeyPoint &kpt, float *desc) const;
 
     GSURFInvoker(const KAZEEvolution& _evolution, std::vector<cv::KeyPoint>& _keypoints, cv::Mat& _desc, const KAZEOptions& options)
-        : evolution(_evolution)
-        , keypoints(_keypoints)
-        , desc(_desc)
+        : evolution(&_evolution)
+        , keypoints(&_keypoints)
+        , desc(&_desc)
         , upright(options.upright)
         , extended(options.extended)
         , imgSize(options.img_width, options.img_height)
     {
         // We select the required extraction function only once during object creation. It's faster than doing to IF's for each keypoint.
         if (upright)
+        {
             computeDescriptorFn = extended ? &GSURFInvoker::Get_GSURF_Descriptor_128 : &GSURFInvoker::Get_GSURF_Upright_Descriptor_64;
+        }
         else
+        {
             computeDescriptorFn = extended ? &GSURFInvoker::Get_GSURF_Descriptor_128 : &GSURFInvoker::Get_GSURF_Descriptor_64;
+    }
     }
 
     /**
@@ -1340,13 +1314,17 @@ struct GSURFInvoker : public cv::ParallelLoopBody
     {
         for (int i = r.start; i < r.end; i++)
         {
-            cv::KeyPoint& kp   = keypoints[i];
-            float * descriptor = desc.ptr<float>(i);
+            cv::KeyPoint& kp   = (*keypoints)[i];
+            float * descriptor = (*desc).ptr<float>(i);
 
             if (upright)
-                kp.angle = 0;
+            {
+                kp.angle = 0.0f;
+            }
             else
-                Compute_Main_Orientation_SURF(kp, evolution, imgSize);
+            {
+                Compute_Main_Orientation_SURF(kp, *evolution, imgSize);
+            }
 
             (this->*computeDescriptorFn)(kp, descriptor);
         }
@@ -1354,14 +1332,12 @@ struct GSURFInvoker : public cv::ParallelLoopBody
 
 private:
 
-    const std::vector<tevolution>& evolution;
-    std::vector<cv::KeyPoint>&     keypoints;
-    cv::Mat&                       desc;
-
+    const std::vector<tevolution>* evolution;
+    std::vector<cv::KeyPoint>*     keypoints;
+    cv::Mat*                       desc;
     bool                           upright;
     bool                           extended;
     cv::Size                       imgSize;
-
     DescriptorComputeFn            computeDescriptorFn;
 
 private:
@@ -1427,38 +1403,38 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         modg = pow(rx,2) + pow(ry,2);
 
                         if( modg != 0.0 )
                         {
-                            res1 = *(evolution[level].Lxx.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lxx.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lxx.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lxx.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lxx.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lxx.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lxx.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lxx.ptr<float>(y2)+x2);
                             rxx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                            res1 = *(evolution[level].Lxy.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lxy.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lxy.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lxy.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lxy.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lxy.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lxy.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lxy.ptr<float>(y2)+x2);
                             rxy = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                            res1 = *(evolution[level].Lyy.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lyy.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lyy.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lyy.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lyy.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lyy.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lyy.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lyy.ptr<float>(y2)+x2);
                             ryy = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                             // Lww = (Lx^2 * Lxx + 2*Lx*Lxy*Ly + Ly^2*Lyy) / (Lx^2 + Ly^2)
@@ -1499,12 +1475,6 @@ private:
         {
             desc[i] /= len;
         }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
-        }
-
     }
 
     /**
@@ -1565,38 +1535,38 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         modg = pow(rx,2) + pow(ry,2);
 
                         if( modg != 0.0 )
                         {
-                            res1 = *(evolution[level].Lxx.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lxx.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lxx.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lxx.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lxx.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lxx.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lxx.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lxx.ptr<float>(y2)+x2);
                             rxx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                            res1 = *(evolution[level].Lxy.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lxy.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lxy.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lxy.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lxy.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lxy.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lxy.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lxy.ptr<float>(y2)+x2);
                             rxy = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                            res1 = *(evolution[level].Lyy.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lyy.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lyy.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lyy.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lyy.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lyy.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lyy.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lyy.ptr<float>(y2)+x2);
                             ryy = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                             // Lww = (Lx^2 * Lxx + 2*Lx*Lxy*Ly + Ly^2*Lyy) / (Lx^2 + Ly^2)
@@ -1636,11 +1606,6 @@ private:
         for(int i = 0; i < dsize; i++)
         {
             desc[i] /= len;
-        }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc, dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
         }
     }
 
@@ -1708,38 +1673,38 @@ private:
                         fx = sample_x-x1;
                         fy = sample_y-y1;
 
-                        res1 = *(evolution[level].Lx.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Lx.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Lx.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Lx.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Lx.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Lx.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Lx.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Lx.ptr<float>(y2)+x2);
                         rx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                        res1 = *(evolution[level].Ly.ptr<float>(y1)+x1);
-                        res2 = *(evolution[level].Ly.ptr<float>(y1)+x2);
-                        res3 = *(evolution[level].Ly.ptr<float>(y2)+x1);
-                        res4 = *(evolution[level].Ly.ptr<float>(y2)+x2);
+                        res1 = *((*evolution)[level].Ly.ptr<float>(y1)+x1);
+                        res2 = *((*evolution)[level].Ly.ptr<float>(y1)+x2);
+                        res3 = *((*evolution)[level].Ly.ptr<float>(y2)+x1);
+                        res4 = *((*evolution)[level].Ly.ptr<float>(y2)+x2);
                         ry = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                         modg = pow(rx,2) + pow(ry,2);
 
                         if( modg != 0.0 )
                         {
-                            res1 = *(evolution[level].Lxx.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lxx.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lxx.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lxx.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lxx.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lxx.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lxx.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lxx.ptr<float>(y2)+x2);
                             rxx = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                            res1 = *(evolution[level].Lxy.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lxy.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lxy.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lxy.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lxy.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lxy.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lxy.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lxy.ptr<float>(y2)+x2);
                             rxy = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
-                            res1 = *(evolution[level].Lyy.ptr<float>(y1)+x1);
-                            res2 = *(evolution[level].Lyy.ptr<float>(y1)+x2);
-                            res3 = *(evolution[level].Lyy.ptr<float>(y2)+x1);
-                            res4 = *(evolution[level].Lyy.ptr<float>(y2)+x2);
+                            res1 = *((*evolution)[level].Lyy.ptr<float>(y1)+x1);
+                            res2 = *((*evolution)[level].Lyy.ptr<float>(y1)+x2);
+                            res3 = *((*evolution)[level].Lyy.ptr<float>(y2)+x1);
+                            res4 = *((*evolution)[level].Lyy.ptr<float>(y2)+x2);
                             ryy = (1.0-fx)*(1.0-fy)*res1 + fx*(1.0-fy)*res2 + (1.0-fx)*fy*res3 + fx*fy*res4;
 
                             // Lww = (Lx^2 * Lxx + 2*Lx*Lxy*Ly + Ly^2*Lyy) / (Lx^2 + Ly^2)
@@ -1790,8 +1755,7 @@ private:
                 desc[dcount++] = mdyn;
 
                 // Store the current length^2 of the vector
-                len += dxp*dxp + dxn*dxn + mdxp*mdxp + mdxn*mdxn +
-                    dyp*dyp + dyn*dyn + mdyp*mdyp + mdyn*mdyn;
+                len += dxp*dxp+dxn*dxn+mdxp*mdxp+mdxn*mdxn+dyp*dyp+dyn*dyn+mdyp*mdyp+mdyn*mdyn;
             }
         }
 
@@ -1802,18 +1766,128 @@ private:
         {
             desc[i] /= len;
         }
-
-        if( USE_CLIPPING_NORMALIZATION == true )
-        {
-            Clipping_Descriptor(desc,dsize, CLIPPING_NORMALIZATION_NITER,CLIPPING_NORMALIZATION_RATIO);
-        }
     }
 };
 
 //*******************************************************************************
+//*******************************************************************************
 
+/**
+* @brief Functional object to compute the multiscale derivatives in parallel
+*/
+struct DerivativesInvoker : public cv::ParallelLoopBody
+{
+    DerivativesInvoker(KAZEEvolution& _evolution)
+        : m_evolution(&_evolution)
+    {
+    }
 
+    void operator()(const cv::Range& r) const
+    {
+        KAZEEvolution& evolution = *m_evolution;
 
+        for (int i = r.start; i < r.end; i++)
+        {
+            // Compute multiscale derivatives for the detector
+            Compute_Scharr_Derivatives(evolution[i].Lsmooth,evolution[i].Lx,1,0,evolution[i].sigma_size);
+            Compute_Scharr_Derivatives(evolution[i].Lsmooth,evolution[i].Ly,0,1,evolution[i].sigma_size);
+            Compute_Scharr_Derivatives(evolution[i].Lx,evolution[i].Lxx,1,0,evolution[i].sigma_size);
+            Compute_Scharr_Derivatives(evolution[i].Ly,evolution[i].Lyy,0,1,evolution[i].sigma_size);
+            Compute_Scharr_Derivatives(evolution[i].Lx,evolution[i].Lxy,0,1,evolution[i].sigma_size);
+
+            evolution[i].Lx = evolution[i].Lx*((evolution[i].sigma_size));
+            evolution[i].Ly = evolution[i].Ly*((evolution[i].sigma_size));
+            evolution[i].Lxx = evolution[i].Lxx*((evolution[i].sigma_size)*(evolution[i].sigma_size));
+            evolution[i].Lxy = evolution[i].Lxy*((evolution[i].sigma_size)*(evolution[i].sigma_size));
+            evolution[i].Lyy = evolution[i].Lyy*((evolution[i].sigma_size)*(evolution[i].sigma_size));
+        }
+    }
+
+private:
+    KAZEEvolution *m_evolution;
+};
+
+//*******************************************************************************
+//*******************************************************************************
+
+/**
+* @brief Functional object to find extrema keypoints in parallel
+*/
+struct FindExtremaInvoker : public cv::ParallelLoopBody
+{
+    FindExtremaInvoker(KAZEEvolution& _evolution, std::vector<std::vector<cv::KeyPoint> > &_keypoints,
+                       float _dthreshold)
+        : m_evolution(&_evolution), m_keypoints(&_keypoints), dthreshold(_dthreshold)
+    {
+    }
+
+    void operator()(const cv::Range& r) const
+    {
+        KAZEEvolution& evolution                           = *m_evolution;
+        std::vector<std::vector<cv::KeyPoint> >& keypoints = *m_keypoints;
+
+        for (int i = r.start; i < r.end; i++)
+        {
+            float value = 0.0f;
+            bool is_extremum = false;
+
+            for( int ix = 1; ix < evolution[i].Ldet.rows-1; ix++ )
+            {
+                for( int jx = 1; jx < evolution[i].Ldet.cols-1; jx++ )
+                {
+                    is_extremum = false;
+                    value = *(evolution[i].Ldet.ptr<float>(ix)+jx);
+
+                    // Filter the points with the detector threshold
+                    if( value > dthreshold && value >= DEFAULT_MIN_DETECTOR_THRESHOLD )
+                    {
+                        if( value >= *(evolution[i].Ldet.ptr<float>(ix)+jx-1) )
+                        {
+                            // First check on the same scale
+                            if( Check_Maximum_Neighbourhood(evolution[i].Ldet,1,value,ix,jx,1))
+                            {
+                                // Now check on the lower scale
+                                if( Check_Maximum_Neighbourhood(evolution[i-1].Ldet,1,value,ix,jx,0) )
+                                {
+                                    // Now check on the upper scale
+                                    if( Check_Maximum_Neighbourhood(evolution[i+1].Ldet,1,value,ix,jx,0) )
+                                    {
+                                        is_extremum = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Add the point of interest!!
+                    if( is_extremum == true )
+                    {
+                        cv::KeyPoint point;
+                        point.pt.x = jx;
+                        point.pt.y = ix;
+                        point.response = fabs(value);
+                        point.size = evolution[i].esigma;
+                        point.octave = evolution[i].octave;
+                        point.class_id = i;
+
+                        // We use the angle field for the sublevel value
+                        // Then, we will replace this angle field with the main orientation
+                        point.angle = evolution[i].sublevel;
+                        keypoints[i-1].push_back(point);
+                    }
+                }
+            }
+        }
+    }
+
+private:
+    KAZEEvolution *                           m_evolution;
+    std::vector<std::vector<cv::KeyPoint> > * m_keypoints;
+    float                                     dthreshold;
+};
+
+//*******************************************************************************
+//*******************************************************************************
 
 /**
 * @brief KAZE constructor with input options
@@ -1824,7 +1898,6 @@ KAZE::KAZE(KAZEOptions &opt)
     : options(opt)
     , kcontrast(DEFAULT_KCONTRAST)
 {
-
     tkcontrast = 0.0;
     tnlscale = 0.0;
     tdetector = 0.0;
@@ -1852,7 +1925,6 @@ void KAZE::Allocate_Memory_Evolution(void)
     {		
         for( int j = 0; j <= options.nsublevels-1; j++ )
         {
-
             tevolution aux;
             aux.Lx  = cv::Mat::zeros(img_height,img_width,CV_32F);
             aux.Ly  = cv::Mat::zeros(img_height,img_width,CV_32F);
@@ -1887,7 +1959,6 @@ void KAZE::Allocate_Memory_Evolution(void)
     by = cv::Mat::zeros(img_height-1,img_width,CV_32F);
     qr = cv::Mat::zeros(img_height-1,img_width,CV_32F);
     qc = cv::Mat::zeros(img_height,img_width-1,CV_32F);
-
 }
 
 //*******************************************************************************
@@ -1920,12 +1991,6 @@ int KAZE::Create_Nonlinear_Scale_Space(const cv::Mat &img)
     int64 t2 = cv::getTickCount();
     tkcontrast = 1000.0 * (t2 - start_t1) / cv::getTickFrequency();
 
-    if( options.verbose )
-    {
-        std::cout << "Computed image evolution step. Evolution time: " << evolution[0].etime << 
-            " Sigma: " << evolution[0].esigma << std::endl;
-    }
-
     // Now generate the rest of evolution levels
     for( unsigned int i = 1; i < evolution.size(); i++ )
     {
@@ -1938,31 +2003,20 @@ int KAZE::Create_Nonlinear_Scale_Space(const cv::Mat &img)
         // Compute the conductivity equation
         if( options.diffusivity == 0 )
         {
-            PM_G1(evolution[i].Lsmooth,evolution[i].Lflow,evolution[i].Lx,evolution[i].Ly, kcontrast);
+            PM_G1(evolution[i].Lx,evolution[i].Ly,evolution[i].Lflow,kcontrast);
         }
         else if( options.diffusivity == 1 )
         {
-            PM_G2(evolution[i].Lsmooth,evolution[i].Lflow,evolution[i].Lx,evolution[i].Ly, kcontrast);
+            PM_G2(evolution[i].Lx,evolution[i].Ly,evolution[i].Lflow,kcontrast);
         }
         else if( options.diffusivity == 2 )
         {
-            Weickert_Diffusivity(evolution[i].Lsmooth,evolution[i].Lflow,evolution[i].Lx,evolution[i].Ly, kcontrast);
+            Weickert_Diffusivity(evolution[i].Lx,evolution[i].Ly,evolution[i].Lflow,kcontrast);
         }
 
         // Perform the evolution step with AOS
-#if HAVE_THREADING_SUPPORT
-        AOS_Step_Scalar_Parallel(evolution[i].Lt,evolution[i-1].Lt,evolution[i].Lflow,evolution[i].etime-evolution[i-1].etime);
-#else
         AOS_Step_Scalar(evolution[i].Lt,evolution[i-1].Lt,evolution[i].Lflow,evolution[i].etime-evolution[i-1].etime);
-#endif
-
-        if( options.verbose )
-        {
-            std::cout << "Computed image evolution step " << i << " Evolution time: " << evolution[i].etime << 
-                " Sigma: " << evolution[i].esigma << std::endl;
-        }
     }
-
 
     t2 = cv::getTickCount();
     tnlscale = 1000.0*(t2-start_t1) / cv::getTickFrequency();
@@ -1980,22 +2034,8 @@ int KAZE::Create_Nonlinear_Scale_Space(const cv::Mat &img)
 */
 void KAZE::Compute_KContrast(const cv::Mat &img, const float &kpercentile)
 {
-    if (options.verbose)
-    {
-        std::cout << "Computing Kcontrast factor." << std::endl;
-    }
-
-    if (COMPUTE_KCONTRAST == true )
-    {
         kcontrast = Compute_K_Percentile(img,kpercentile, options.sderivatives,KCONTRAST_NBINS,0,0);
     }
-
-    if (options.verbose)
-    {
-        std::cout << "kcontrast = " << kcontrast << std::endl;
-        std::cout << std::endl << "Now computing the nonlinear scale space!!" << std::endl;
-    }	
-}
 
 //*************************************************************************************
 //*************************************************************************************
@@ -2007,26 +2047,7 @@ void KAZE::Compute_Multiscale_Derivatives(void)
 {
     int64 t1 = cv::getTickCount();
 
-    for( unsigned int i = 0; i < evolution.size(); i++ )
-    {
-        if( options.verbose )
-        {
-            std::cout << "Computing multiscale derivatives. Evolution time: " << evolution[i].etime << " Step (pixels): " << evolution[i].sigma_size << std::endl;
-        }
-
-        // Compute multiscale derivatives for the detector
-        Compute_Scharr_Derivatives(evolution[i].Lsmooth,evolution[i].Lx,1,0,evolution[i].sigma_size);
-        Compute_Scharr_Derivatives(evolution[i].Lsmooth,evolution[i].Ly,0,1,evolution[i].sigma_size);
-        Compute_Scharr_Derivatives(evolution[i].Lx,evolution[i].Lxx,1,0,evolution[i].sigma_size);
-        Compute_Scharr_Derivatives(evolution[i].Ly,evolution[i].Lyy,0,1,evolution[i].sigma_size);
-        Compute_Scharr_Derivatives(evolution[i].Lx,evolution[i].Lxy,0,1,evolution[i].sigma_size);
-
-        evolution[i].Lx = evolution[i].Lx*((evolution[i].sigma_size));
-        evolution[i].Ly = evolution[i].Ly*((evolution[i].sigma_size));
-        evolution[i].Lxx = evolution[i].Lxx*((evolution[i].sigma_size)*(evolution[i].sigma_size));
-        evolution[i].Lxy = evolution[i].Lxy*((evolution[i].sigma_size)*(evolution[i].sigma_size));
-        evolution[i].Lyy = evolution[i].Lyy*((evolution[i].sigma_size)*(evolution[i].sigma_size));
-    }
+    cv::parallel_for_(cv::Range(0,evolution.size()),DerivativesInvoker(evolution));
 
     int64 t2 = cv::getTickCount();
     tmderivatives = 1000.0 * (t2-t1) / cv::getTickFrequency();
@@ -2042,8 +2063,6 @@ void KAZE::Compute_Multiscale_Derivatives(void)
 void KAZE::Compute_Detector_Response(void)
 {
     float lxx = 0.0, lxy = 0.0, lyy = 0.0;
-    float *ptr;
-
     int64 t1 = cv::getTickCount();
 
     // Firstly compute the multiscale derivatives
@@ -2052,26 +2071,14 @@ void KAZE::Compute_Detector_Response(void)
     for( unsigned int i = 0; i < evolution.size(); i++ )
     {		
         // Determinant of the Hessian
-        if( options.verbose )
-        {
-            std::cout << "Computing detector response. Determinant of Hessian. Evolution time: " << evolution[i].etime << std::endl;
-        }
-
         for( int ix = 0; ix < options.img_height; ix++ )
         {
             for( int jx = 0; jx < options.img_width; jx++ )
             {
-                ptr = evolution[i].Lxx.ptr<float>(ix);
-                lxx = ptr[jx];
-
-                ptr = evolution[i].Lxy.ptr<float>(ix);
-                lxy = ptr[jx];
-
-                ptr = evolution[i].Lyy.ptr<float>(ix);
-                lyy = ptr[jx];
-
-                ptr = evolution[i].Ldet.ptr<float>(ix);
-                ptr[jx] = (lxx*lyy-lxy*lxy);
+                lxx = *(evolution[i].Lxx.ptr<float>(ix)+jx);
+                lxy = *(evolution[i].Lxy.ptr<float>(ix)+jx);
+                lyy = *(evolution[i].Lyy.ptr<float>(ix)+jx);
+                *(evolution[i].Ldet.ptr<float>(ix)+jx) = (lxx*lyy-lxy*lxy);
             }
         }
     }
@@ -2095,7 +2102,7 @@ void KAZE::Feature_Detection(std::vector<cv::KeyPoint> &kpts)
     Compute_Detector_Response();
 
     // Find scale space extrema
-    Determinant_Hessian_Parallel(kpts);
+    Find_Extrema_Parallel(kpts);
 
     // Perform some subpixel refinement
     Do_Subpixel_Refinement(kpts);
@@ -2113,21 +2120,17 @@ void KAZE::Feature_Detection(std::vector<cv::KeyPoint> &kpts)
 * @param kpts Vector of keypoints
 * @note We compute features for each of the nonlinear scale space level in a different processing thread
 */
-void KAZE::Determinant_Hessian_Parallel(std::vector<cv::KeyPoint> &kpts)
+void KAZE::Find_Extrema_Parallel(std::vector<cv::KeyPoint> &kpts)
 {
-    unsigned int level = 0;
-    float dist = 0.0, smax = 0.0;
+    int level = 0;
+    float dist = 0.0, smax = 3.0;
     int npoints = 0, id_repeated = 0;
     int left_x = 0, right_x = 0, up_y = 0, down_y = 0;
     bool is_extremum = false, is_repeated = false, is_out = false;
 
     // Delete the memory of the vector of keypoints vectors
     kpts_par.clear();
-
     std::vector<cv::KeyPoint> aux;
-
-    // Create multi-thread
-    //boost::thread_group mthreads;
 
     // Allocate memory for the vector of vectors
     for( unsigned int i = 1; i < evolution.size()-1; i++ )
@@ -2135,33 +2138,8 @@ void KAZE::Determinant_Hessian_Parallel(std::vector<cv::KeyPoint> &kpts)
         kpts_par.push_back(aux);
     }
 
-    // Set smax
-    if (options.descriptor == 0 || options.descriptor == 2)
-    {
-        smax = 11.0*sqrt(2);
-    }
-    else if( options.descriptor == 1 )
-    {
-        smax = 12.0*sqrt(2);
-    }
-
-    for( unsigned int i = 1; i < evolution.size()-1; i++ )
-    {	
-        if( options.verbose )
-        {
-            std::cout << "Computing Feature Detection. Determinant of Hessian. Evolution time: " << evolution[i].etime << std::endl;
-        }	
-
-        // Create the thread for finding extremum at i scale level
-
-        //mthreads.create_thread(boost::bind(&KAZE::Find_Extremum_Threading,this,i));
-        Find_Extremum_Threading(i);
-
-
-    }
-
-    // Wait for the threads
-    //mthreads.join_all();
+    // Find extrema in the nonlinear scale space
+    cv::parallel_for_(cv::Range(1,evolution.size()-1),FindExtremaInvoker(evolution,kpts_par,options.dthreshold));
 
     // Now fill the vector of keypoints!!!
     for( unsigned int i = 0; i < kpts_par.size(); i++ )
@@ -2234,67 +2212,6 @@ void KAZE::Determinant_Hessian_Parallel(std::vector<cv::KeyPoint> &kpts)
 //*************************************************************************************
 
 /**
-* @brief This method is called by the thread which is responsible of finding extrema
-* at a given nonlinear scale level
-* @param level Index in the nonlinear scale space evolution
-*/
-void KAZE::Find_Extremum_Threading(int level)
-{
-    float value = 0.0;
-    bool is_extremum = false;
-
-    for( int ix = 1; ix < options.img_height-1; ix++ )
-    {
-        for( int jx = 1; jx < options.img_width-1; jx++ )
-        {
-            is_extremum = false;
-            value = *(evolution[level].Ldet.ptr<float>(ix)+jx);
-
-            // Filter the points with the detector threshold
-            if( value > options.dthreshold && value >= DEFAULT_MIN_DETECTOR_THRESHOLD )
-            {
-                if( value >= *(evolution[level].Ldet.ptr<float>(ix)+jx-1) )
-                {
-                    // First check on the same scale
-                    if( Check_Maximum_Neighbourhood(evolution[level].Ldet,1,value,ix,jx,1))
-                    {
-                        // Now check on the lower scale
-                        if( Check_Maximum_Neighbourhood(evolution[level-1].Ldet,1,value,ix,jx,0) )
-                        {
-                            // Now check on the upper scale
-                            if( Check_Maximum_Neighbourhood(evolution[level+1].Ldet,1,value,ix,jx,0) )
-                            {
-                                is_extremum = true;
-                            }
-                        }
-                    }							
-                }
-            }
-
-            // Add the point of interest!!
-            if( is_extremum == true )
-            {
-                cv::KeyPoint point;
-                point.pt.x = jx;
-                point.pt.y = ix;
-                point.response = fabs(value);
-                point.size = evolution[level].esigma;
-                point.octave = evolution[level].octave;
-                point.class_id = level;
-
-                // We use the angle field for the sublevel value
-                // Then, we will replace this angle field with the main orientation
-                point.angle = evolution[level].sublevel;
-                kpts_par[level-1].push_back(point);
-            }
-        }
-    }
-}
-
-//*************************************************************************************
-//*************************************************************************************
-
-/**
 * @brief This method performs subpixel refinement of the detected keypoints
 * @param kpts Vector of detected keypoints
 */
@@ -2308,47 +2225,48 @@ void KAZE::Do_Subpixel_Refinement(std::vector<cv::KeyPoint> &kpts)
     cv::Mat dst = cv::Mat::zeros(3,1,CV_32F);
 
     int64 t1 = cv::getTickCount();
+    std::vector<cv::KeyPoint> kpts_(kpts);
 
-    for( unsigned int i = 0; i < kpts.size(); i++ )
+    for( unsigned int i = 0; i < kpts_.size(); i++ )
     {
-        x = kpts[i].pt.x;
-        y = kpts[i].pt.y;
+         x = kpts_[i].pt.x;
+         y = kpts_[i].pt.y;
 
         // Compute the gradient
-        Dx = (1.0/(2.0*step))*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y)+x+step)
-            -*(evolution[kpts[i].class_id].Ldet.ptr<float>(y)+x-step));
-        Dy = (1.0/(2.0*step))*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y+step)+x)
-            -*(evolution[kpts[i].class_id].Ldet.ptr<float>(y-step)+x));
-        Ds = 0.5*(*(evolution[kpts[i].class_id+1].Ldet.ptr<float>(y)+x)
-            -*(evolution[kpts[i].class_id-1].Ldet.ptr<float>(y)+x));
+         Dx = (1.0/(2.0*step))*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y)+x+step)
+                               -*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y)+x-step));
+         Dy = (1.0/(2.0*step))*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y+step)+x)
+                               -*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y-step)+x));
+         Ds = 0.5*(*(evolution[kpts_[i].class_id+1].Ldet.ptr<float>(y)+x)
+                  -*(evolution[kpts_[i].class_id-1].Ldet.ptr<float>(y)+x));
 
         // Compute the Hessian
-        Dxx = (1.0/(step*step))*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y)+x+step)
-            + *(evolution[kpts[i].class_id].Ldet.ptr<float>(y)+x-step)
-            -2.0*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y)+x)));
+         Dxx = (1.0/(step*step))*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y)+x+step)
+                                + *(evolution[kpts_[i].class_id].Ldet.ptr<float>(y)+x-step)
+                                -2.0*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y)+x)));
 
-        Dyy = (1.0/(step*step))*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y+step)+x)
-            + *(evolution[kpts[i].class_id].Ldet.ptr<float>(y-step)+x)
-            -2.0*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y)+x)));
+         Dyy = (1.0/(step*step))*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y+step)+x)
+                                + *(evolution[kpts_[i].class_id].Ldet.ptr<float>(y-step)+x)
+                                -2.0*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y)+x)));
 
-        Dss = *(evolution[kpts[i].class_id+1].Ldet.ptr<float>(y)+x)
-            + *(evolution[kpts[i].class_id-1].Ldet.ptr<float>(y)+x)
-            -2.0*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y)+x));
+         Dss = *(evolution[kpts_[i].class_id+1].Ldet.ptr<float>(y)+x)
+               + *(evolution[kpts_[i].class_id-1].Ldet.ptr<float>(y)+x)
+              -2.0*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y)+x));
 
-        Dxy = (1.0/(4.0*step))*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y+step)+x+step)
-            +(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y-step)+x-step)))
-            -(1.0/(4.0*step))*(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y-step)+x+step)
-            +(*(evolution[kpts[i].class_id].Ldet.ptr<float>(y+step)+x-step)));
+         Dxy = (1.0/(4.0*step))*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y+step)+x+step)
+                               +(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y-step)+x-step)))
+               -(1.0/(4.0*step))*(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y-step)+x+step)
+                                +(*(evolution[kpts_[i].class_id].Ldet.ptr<float>(y+step)+x-step)));
 
-        Dxs = (1.0/(4.0*step))*(*(evolution[kpts[i].class_id+1].Ldet.ptr<float>(y)+x+step)
-            +(*(evolution[kpts[i].class_id-1].Ldet.ptr<float>(y)+x-step)))
-            -(1.0/(4.0*step))*(*(evolution[kpts[i].class_id+1].Ldet.ptr<float>(y)+x-step)
-            +(*(evolution[kpts[i].class_id-1].Ldet.ptr<float>(y)+x+step)));
+         Dxs = (1.0/(4.0*step))*(*(evolution[kpts_[i].class_id+1].Ldet.ptr<float>(y)+x+step)
+                               +(*(evolution[kpts_[i].class_id-1].Ldet.ptr<float>(y)+x-step)))
+              -(1.0/(4.0*step))*(*(evolution[kpts_[i].class_id+1].Ldet.ptr<float>(y)+x-step)
+                               +(*(evolution[kpts_[i].class_id-1].Ldet.ptr<float>(y)+x+step)));
 
-        Dys = (1.0/(4.0*step))*(*(evolution[kpts[i].class_id+1].Ldet.ptr<float>(y+step)+x)
-            +(*(evolution[kpts[i].class_id-1].Ldet.ptr<float>(y-step)+x)))
-            -(1.0/(4.0*step))*(*(evolution[kpts[i].class_id+1].Ldet.ptr<float>(y-step)+x)
-            +(*(evolution[kpts[i].class_id-1].Ldet.ptr<float>(y+step)+x)));
+         Dys = (1.0/(4.0*step))*(*(evolution[kpts_[i].class_id+1].Ldet.ptr<float>(y+step)+x)
+                               +(*(evolution[kpts_[i].class_id-1].Ldet.ptr<float>(y-step)+x)))
+              -(1.0/(4.0*step))*(*(evolution[kpts_[i].class_id+1].Ldet.ptr<float>(y-step)+x)
+                               +(*(evolution[kpts_[i].class_id-1].Ldet.ptr<float>(y+step)+x)));
 
         // Solve the linear system
         *(A.ptr<float>(0)) = Dxx;
@@ -2367,19 +2285,29 @@ void KAZE::Do_Subpixel_Refinement(std::vector<cv::KeyPoint> &kpts)
 
         if( fabs(*(dst.ptr<float>(0))) <= 1.0 && fabs(*(dst.ptr<float>(1))) <= 1.0 && fabs(*(dst.ptr<float>(2))) <= 1.0 )
         {             
-            kpts[i].pt.x += *(dst.ptr<float>(0));
-            kpts[i].pt.y += *(dst.ptr<float>(1));
-            dsc = kpts[i].octave + (kpts[i].angle+*(dst.ptr<float>(2)))/((float)(options.nsublevels));
+             kpts_[i].pt.x += *(dst.ptr<float>(0));
+             kpts_[i].pt.y += *(dst.ptr<float>(1));
+             dsc = kpts_[i].octave + (kpts_[i].angle+*(dst.ptr<float>(2)))/((float)(options.nsublevels));
 
             // In OpenCV the size of a keypoint is the diameter!!
-            kpts[i].size = 2.0 * options.soffset * pow((float)2.0,dsc);
-            kpts[i].angle = 0.0;
+             kpts_[i].size = 2.0*options.soffset*pow((float)2.0,dsc);
+             kpts_[i].angle = 0.0;
+                }
+         // Set the points to be deleted after the for loop
+                else
+                {
+            kpts_[i].response = -1;
         }
-        // Delete the point since its not stable
-        else
+    }
+
+    // Clear the vector of keypoints
+    kpts.clear();
+
+    for( unsigned int i = 0; i < kpts_.size(); i++ )
+            {
+        if( kpts_[i].response != -1 )
         {
-            kpts.erase(kpts.begin()+i);
-            i--;
+            kpts.push_back(kpts_[i]);
         }
     }
 
@@ -2388,71 +2316,6 @@ void KAZE::Do_Subpixel_Refinement(std::vector<cv::KeyPoint> &kpts)
 }
 
 //*************************************************************************************
-//*************************************************************************************
-
-/**
-* @brief This method performs feature suppression based on 2D distance
-* @param kpts Vector of keypoints
-* @param mdist Maximum distance in pixels
-*/
-void KAZE::Feature_Suppression_Distance(std::vector<cv::KeyPoint> &kpts, float mdist)
-{
-    std::vector<cv::KeyPoint> aux;
-    std::vector<unsigned int> to_delete;
-    float dist = 0.0, x1 = 0.0, y1 = 0.0, x2 = 0.0, y2 = 0.0;
-    bool found = false;
-
-    for( unsigned int i = 0; i < kpts.size(); i++ )
-    {
-        x1 = kpts[i].pt.x;
-        y1 = kpts[i].pt.y;
-
-        for( unsigned int j = i+1; j < kpts.size(); j++ )
-        {
-            x2 = kpts[j].pt.x;
-            y2 = kpts[j].pt.y;
-
-            dist = sqrt(pow(x1-x2,2)+pow(y1-y2,2));
-
-            if( dist < mdist )
-            {
-                if( fabs(kpts[i].response) >= fabs(kpts[j].response) )
-                {
-                    to_delete.push_back(j);
-                }
-                else
-                {
-                    to_delete.push_back(i);
-                    break;
-                }
-            }			 
-        }
-    }
-
-    for( unsigned int i = 0; i < kpts.size(); i++ )
-    {
-        found = false;
-
-        for( unsigned int j = 0; j < to_delete.size(); j++ )
-        {
-            if( i == to_delete[j] )
-            {
-                found = true;
-                break;
-            }
-        }
-
-        if( found == false )
-        {
-            aux.push_back(kpts[i]);
-        }
-    }
-
-    kpts.clear();
-    kpts = aux;
-    aux.clear();
-}
-
 //*************************************************************************************
 
 /**
@@ -2491,12 +2354,8 @@ void KAZE::Feature_Description(std::vector<cv::KeyPoint> &kpts, cv::Mat &desc)
     tdescriptor = 1000.0*(t2-t1) / cv::getTickFrequency();
 }
 
-//*************************************************************************************
-
-
-
-
-
+//*******************************************************************************
+//*******************************************************************************
 
 /**
 * @brief This method performs a scalar non-linear diffusion step using AOS schemes
@@ -2512,39 +2371,8 @@ void KAZE::AOS_Step_Scalar(cv::Mat &Ld, const cv::Mat &Ldprev, const cv::Mat &c,
 {
     AOS_Rows(Ldprev,c,stepsize);
     AOS_Columns(Ldprev,c,stepsize);
-
     Ld = 0.5*(Lty + Ltx.t());
 }
-
-//*************************************************************************************
-//*************************************************************************************
-
-/**
-* @brief This method performs a scalar non-linear diffusion step using AOS schemes
-* Diffusion in each dimension is computed independently in a different thread
-* @param Ld Image at a given evolution step
-* @param Ldprev Image at a previous evolution step
-* @param c Conductivity image
-* @param stepsize Stepsize for the nonlinear diffusion evolution
-* @note If c is constant, the diffusion will be linear
-* If c is a matrix of the same size as Ld, the diffusion will be nonlinear
-* The stepsize can be arbitrarilly large
-*/
-#if HAVE_THREADING_SUPPORT
-void KAZE::AOS_Step_Scalar_Parallel(cv::Mat &Ld, const cv::Mat &Ldprev, const cv::Mat &c, const float stepsize)
-{
-    boost::thread *AOSth1 = new boost::thread(&KAZE::AOS_Rows,this,Ldprev,c,stepsize);
-    boost::thread *AOSth2 = new boost::thread(&KAZE::AOS_Columns,this,Ldprev,c,stepsize);
-
-    AOSth1->join();
-    AOSth2->join();
-
-    Ld = 0.5*(Lty + Ltx.t());
-
-    delete AOSth1;
-    delete AOSth2;
-}
-#endif
 
 //*************************************************************************************
 //*************************************************************************************
@@ -2591,7 +2419,6 @@ void KAZE::AOS_Rows(const cv::Mat &Ldprev, const cv::Mat &c, const float stepsiz
 
     // Call to Thomas algorithm now
     Thomas(ay,by,Ldprev,Lty);
-
 }
 
 //*************************************************************************************
@@ -2682,7 +2509,7 @@ void KAZE::Thomas(cv::Mat a, cv::Mat b, cv::Mat Ld, cv::Mat x)
         *(y.ptr<float>(0)+j) = *(Ld.ptr<float>(0)+j);
     }
 
-    // 2. Forward substitution L*y = d for y
+    // 1. Forward substitution L*y = d for y
     for( int k = 1; k < n; k++ )
     {
         for( int j=0; j < l.cols; j++ )
@@ -2701,7 +2528,7 @@ void KAZE::Thomas(cv::Mat a, cv::Mat b, cv::Mat Ld, cv::Mat x)
         }
     }
 
-    // 3. Backward substitution U*x = y
+    // 2. Backward substitution U*x = y
     for( int j=0; j < y.cols; j++ )
     {
         *(x.ptr<float>(n-1)+j) = (*(y.ptr<float>(n-1)+j))/(*(m.ptr<float>(n-1)+j));
@@ -2715,6 +2542,9 @@ void KAZE::Thomas(cv::Mat a, cv::Mat b, cv::Mat Ld, cv::Mat x)
         }
     }
 }
+
+//*************************************************************************************
+//*************************************************************************************
 
 /**
 * @brief This function computes the angle from the vector given by (X Y). From 0 to 2*Pi
@@ -2745,43 +2575,8 @@ inline float Get_Angle(float X, float Y)
     return 0;
 }
 
-/**
-* @brief This function performs descriptor clipping
-* @param desc_ Pointer to the descriptor vector
-* @param dsize Size of the descriptor vector
-* @param iter Number of iterations
-* @param ratio Clipping ratio
-*/
-inline void Clipping_Descriptor(float *desc, int dsize, int niter, float ratio)
-{
-    float cratio = ratio / sqrt(dsize);
-    float len = 0.0;
-
-    for( int i = 0; i < niter; i++ )
-    {
-        len = 0.0;
-        for( int j = 0; j < dsize; j++ )
-        {
-            if( desc[j] > cratio )
-            {
-                desc[j] = cratio;
-            }
-            else if( desc[j] < -cratio )
-            {
-                desc[j] = -cratio;
-            }
-            len += desc[j]*desc[j];
-        }
-
-        // Normalize again
-        len = sqrt(len);
-
-        for( int j = 0; j < dsize; j++ )
-        {
-            desc[j] = desc[j] / len;
-        }
-    }
-}
+//*************************************************************************************
+//*************************************************************************************
 
 /**
 * @brief This function computes the value of a 2D Gaussian function
@@ -2793,6 +2588,9 @@ inline float gaussian(float x, float y, float sig)
 {
     return exp(-(x*x+y*y)/(2.0f*sig*sig));
 }
+
+//*************************************************************************************
+//*************************************************************************************
 
 /**
 * @brief This function checks descriptor limits
@@ -2824,10 +2622,22 @@ inline void Check_Descriptor_Limits(int &x, int &y, int width, int height )
     }
 }
 
+//*************************************************************************************
+//*************************************************************************************
+
+/**
+* @brief This function checks descriptor limits
+* @param x X Position
+* @param y Y Position
+* @param sz cv::Size structure with the height and width of the image
+*/
 inline void Check_Descriptor_Limits(int &x, int &y, const cv::Size& sz)
 {
     Check_Descriptor_Limits(x,y, sz.width, sz.height);
 }
+
+//*************************************************************************************
+//*************************************************************************************
 
 /**
 * @brief This function rounds float to nearest integer
@@ -2836,5 +2646,5 @@ inline void Check_Descriptor_Limits(int &x, int &y, const cv::Size& sz)
 */
 static inline int fRound(float flt)
 {
-    return (int)(flt+0.5);
+    return (int)(flt+0.5f);
 }
