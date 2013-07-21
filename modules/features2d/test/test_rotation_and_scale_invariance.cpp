@@ -634,7 +634,7 @@ TEST(Features2d_RotationInvariance_Descriptor_KAZE, regression)
 {
     DescriptorRotationInvarianceTest test(Algorithm::create<FeatureDetector>("Feature2D.KAZE"),
         Algorithm::create<DescriptorExtractor>("Feature2D.KAZE"),
-        NORM_HAMMING,
+        NORM_L2,
         0.99f);
     test.safe_run();
 }
