@@ -96,7 +96,7 @@ namespace cv
 
         if (do_descriptors)
         {
-            cv::KeyPointsFilter::runByImageBorder(_keypoints, cv::Size(opt.img_width, opt.img_height), 40);
+            //cv::KeyPointsFilter::runByImageBorder(_keypoints, cv::Size(opt.img_width, opt.img_height), 40);
             cv::Mat& descriptors = _descriptors.getMatRef();
             evolution.Feature_Description(_keypoints, descriptors);
         }

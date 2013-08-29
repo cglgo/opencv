@@ -2172,7 +2172,7 @@ void KAZE::Find_Extrema_Parallel(std::vector<cv::KeyPoint> &kpts)
                     is_out = true;
                 }
 
-                is_out = false;
+                //is_out = false;
 
                 if( is_out == false )
                 {
